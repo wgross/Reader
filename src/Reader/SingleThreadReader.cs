@@ -18,7 +18,6 @@ namespace Reader
         {
             this.underlyingReader = instance;
             this.pendingReadRequests = new ConcurrentDictionary<string, ReadRequest>();
-            this.dataAvailableEvent = new ManualResetEventSlim();
             this.readerThread = new Thread(this.ReaderLoop);
             this.readerThread.IsBackground = true;
             this.readerThread.Start();
@@ -54,8 +53,6 @@ namespace Reader
 
                 // if the read notifies the manual reset event is set and unlocks the
                 // reader loop
-                // TODO: log is event is set in state 'IsSet'.
-                // This would be the rare case where data comes in after the reading and before the reset of the event.
                 this.underlyingReader.DataAvailable = () => isDataAvailable.Set();
 
                 // the reader loop runs as long a cancellation of the read wasn't requested.
@@ -71,19 +68,20 @@ namespace Reader
                     // before reading any data all canceled read requests are abandoned.
                     this.CleanupPendingRequests();
 
+                    // Reset the event before the reading starts to avoid the case that
+                    // 1. reading is finished
+                    // 2. new data comes in at underlying reader -> notifies: but event is already set
+                    // 3. reset the event
+                    isDataAvailable.Reset();
+
                     // process pending reads
                     this.ReadAllPendingData();
-
-                    // Between the end of reading and the resetting of the event data might have come in.
-                    // It wouldn't be read because the event is already set. But b/c the event has a timeout of 500 ms
-                    // it would be read later.
-
-                    // lock the loop again
-                    isDataAvailable.Reset();
                 }
             }
             catch (OperationCanceledException)
             { }
+            // TODO: log the end of the reader loop
+            // TODO: log unexpected exceptions that break the reader loop.
         }
 
         private void ReadAllPendingData()
