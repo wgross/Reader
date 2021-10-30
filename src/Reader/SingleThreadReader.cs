@@ -37,7 +37,12 @@ namespace Reader
             this.readerThread.Start();
         }
 
-        private record ReadRequest(IReaderTopic Topic, TaskCompletionSource<T> TaskCompletionSource, CancellationToken CancellationToken);
+        private record ReadRequest(IReaderTopic Topic, TaskCompletionSource<T> TaskCompletionSource, CancellationToken CancellationToken)
+        {
+            public void SetCanceled() => this.TaskCompletionSource.SetCanceled(this.CancellationToken);
+
+            public void SetResult(T result) => this.TaskCompletionSource.SetResult(result);
+        }
 
         /// <summary>
         /// Request a topic from the underlying <see cref="INotifyingReader{T}"/>.
@@ -74,41 +79,29 @@ namespace Reader
         {
             try
             {
-                ManualResetEventSlim isDataAvailable = new();
-                ConcurrentQueue<(IReaderTopic topic, T data)> incomingMessages = new();
+                // the reader loop will block on the collection until a message is put into.
+                // incomingMessages.CompleteAdding() isn't called in this scenario. The underlying reader
+                // might need to call it to show it stopped working.
+                BlockingCollection<(IReaderTopic topic, T data)> incomingMessages = new();
 
-                // if the read notifies the manual reset event is set and unlocks the
-                // reader loop
                 this.underlyingReader.DataAvailable = (topic, data) =>
                 {
                     // the notification handler appends the message to the blocking collection.
-                    // this isn't the most minimal processing of the incoming data and should allow the underlying reader
+                    // this is the most minimal processing of the incoming data and should allow the underlying reader
                     // to continue receiving data quickly.
-                    incomingMessages.Enqueue((topic, data));
-                    isDataAvailable.Set();
+                    incomingMessages.Add((topic, data));
                 };
 
                 // the reader loop runs as long a cancellation of the read wasn't requested.
                 while (!this.cancellationTokenSource.IsCancellationRequested)
                 {
-                    // block the reader lop from running.
-                    isDataAvailable.Wait(
-                        // the lock is removed every 500 ms to remove canceled requests
-                        timeout: TimeSpan.FromMilliseconds(500),
-                        // canceling the SingleThreadReader instance also cancels the dataAvailableEvent
-                        cancellationToken: this.cancellationTokenSource.Token);
-
                     // before reading any data all canceled read requests are abandoned.
                     this.CleanupPendingRequests();
 
-                    // Reset the event before the reading starts to avoid the case that
-                    // 1. reading is finished
-                    // 2. new data comes in at underlying reader -> notifies: but event is already set
-                    // 3. reset the event
-                    isDataAvailable.Reset();
-
-                    // process pending reads
-                    this.ProcessIncomingMessages(incomingMessages);
+                    if (incomingMessages.TryTake(out var incomingMessage, TimeSpan.FromMilliseconds(500)))
+                    {
+                        this.ProcessIncomingMessage(incomingMessage);
+                    }
                 }
             }
             catch (OperationCanceledException)
@@ -117,14 +110,17 @@ namespace Reader
             // TODO: log unexpected exceptions that break the reader loop.
         }
 
-        private void ProcessIncomingMessages(ConcurrentQueue<(IReaderTopic topic, T data)> incomingMessages)
+        private void ProcessIncomingMessage((IReaderTopic topic, T data) incomingMessage)
         {
-            while (incomingMessages.TryDequeue(out var incomingMessage))
+            // find the pending read request and set its 'result'. This will unblock the
+            // task completion source and the waiting thread may proceed with processing the result.
+            // incoming data is dropped if no read request is pending.
+            if (this.pendingReadRequests.TryRemove(incomingMessage.topic, out var pendingReadRequest))
             {
-                if (this.pendingReadRequests.TryRemove(incomingMessage.topic, out var pendingReadRequest))
-                {
-                    pendingReadRequest.TaskCompletionSource.SetResult(incomingMessage.data);
-                }
+                pendingReadRequest.SetResult(incomingMessage.data);
+            }
+            else
+            {
                 // TODO: log here that unknown topic was dropped
             }
         }
@@ -136,7 +132,7 @@ namespace Reader
                 if (pendingRequest.CancellationToken.IsCancellationRequested)
                 {
                     // cancel the task completion source
-                    pendingRequest.TaskCompletionSource.SetCanceled(pendingRequest.CancellationToken);
+                    pendingRequest.SetCanceled();
 
                     // and abandon the request
                     this.pendingReadRequests.TryRemove(pendingRequest.Topic, out var _);
@@ -158,10 +154,10 @@ namespace Reader
                     // wait for the execution flow to join the current thread
                     this.readerThread.Join();
 
-                    // cancel all read requests still pending
+                    // cancel all read requests still pending to unlock the waiting threads.
                     foreach (var pendingRequest in this.pendingReadRequests.Values.ToArray())
                     {
-                        pendingRequest.TaskCompletionSource.SetCanceled(pendingRequest.CancellationToken);
+                        pendingRequest.SetCanceled();
                     }
                     this.pendingReadRequests.Clear();
                 }

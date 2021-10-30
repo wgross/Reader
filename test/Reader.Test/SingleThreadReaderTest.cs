@@ -146,6 +146,30 @@ namespace Reader.Test
         }
 
         [Fact]
+        public async Task Read_same_topic_twice()
+        {
+            // ARRANGE
+            var lowLevelReader = new ReaderMock<int>();
+
+            using var reader = new SingleThreadReader<int>(lowLevelReader);
+            await Task.Delay(10);
+
+            var first = reader.RequestAsync(Topic("topic1"), CancellationToken.None);
+            lowLevelReader.SetData(Topic("topic1"), 12);
+            await first;
+
+            // ACT
+            var result = reader.RequestAsync(Topic("topic1"), CancellationToken.None);
+
+            lowLevelReader.SetData(Topic("topic1"), 11);
+
+            // ASSERT
+            var awaitResult = await result;
+
+            Assert.Equal(11, awaitResult);
+        }
+
+        [Fact]
         public async Task Ignore_unkown_topic()
         {
             // ARRANGE
