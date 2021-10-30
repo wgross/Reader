@@ -70,15 +70,23 @@ namespace Reader
             return taskCompletionSource.Task;
         }
 
-        private void ReaderLoop(object obj)
+        private void ReaderLoop(object _)
         {
             try
             {
-                var isDataAvailable = new ManualResetEventSlim();
+                ManualResetEventSlim isDataAvailable = new();
+                ConcurrentQueue<(IReaderTopic topic, T data)> incomingMessages = new();
 
                 // if the read notifies the manual reset event is set and unlocks the
                 // reader loop
-                this.underlyingReader.DataAvailable = () => isDataAvailable.Set();
+                this.underlyingReader.DataAvailable = (topic, data) =>
+                {
+                    // the notification handler appends the message to the blocking collection.
+                    // this isn't the most minimal processing of the incoming data and should allow the underlying reader
+                    // to continue receiving data quickly.
+                    incomingMessages.Enqueue((topic, data));
+                    isDataAvailable.Set();
+                };
 
                 // the reader loop runs as long a cancellation of the read wasn't requested.
                 while (!this.cancellationTokenSource.IsCancellationRequested)
@@ -100,7 +108,7 @@ namespace Reader
                     isDataAvailable.Reset();
 
                     // process pending reads
-                    this.ReadAllPendingData();
+                    this.ProcessIncomingMessages(incomingMessages);
                 }
             }
             catch (OperationCanceledException)
@@ -109,13 +117,13 @@ namespace Reader
             // TODO: log unexpected exceptions that break the reader loop.
         }
 
-        private void ReadAllPendingData()
+        private void ProcessIncomingMessages(ConcurrentQueue<(IReaderTopic topic, T data)> incomingMessages)
         {
-            while (this.underlyingReader.TryRead(out var readData))
+            while (incomingMessages.TryDequeue(out var incomingMessage))
             {
-                if (this.pendingReadRequests.TryRemove(readData.topic, out var pendingReadRequest))
+                if (this.pendingReadRequests.TryRemove(incomingMessage.topic, out var pendingReadRequest))
                 {
-                    pendingReadRequest.TaskCompletionSource.SetResult(readData.data);
+                    pendingReadRequest.TaskCompletionSource.SetResult(incomingMessage.data);
                 }
                 // TODO: log here that unknown topic was dropped
             }

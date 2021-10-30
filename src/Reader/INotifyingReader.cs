@@ -2,10 +2,12 @@
 
 namespace Reader
 {
+    /// <summary>
+    /// Abstraction of a reader which sends an event when data is received.
+    /// </summary>
+    /// <typeparam name="T"></typeparam>
     public interface INotifyingReader<T>
     {
-        Action DataAvailable { set; }
-
-        bool TryRead(out (IReaderTopic topic, T data) data);
+        Action<IReaderTopic, T> DataAvailable { set; }
     }
 }
