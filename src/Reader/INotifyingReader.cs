@@ -6,6 +6,6 @@ namespace Reader
     {
         Action DataAvailable { set; }
 
-        bool TryRead(out (string topic, T data) data);
+        bool TryRead(out (IReaderTopic topic, T data) data);
     }
 }

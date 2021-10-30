@@ -8,39 +8,64 @@ namespace Reader
 {
     public sealed class SingleThreadReader<T> : IDisposable
     {
+        /// <summary>
+        /// The reader abstraction.
+        /// </summary>
         private readonly INotifyingReader<T> underlyingReader;
-        private readonly Thread readerThread;
-        private readonly ConcurrentDictionary<string, ReadRequest> pendingReadRequests;
 
+        /// <summary>
+        /// The actual reading thread. Processes sequentially all incoming data.
+        /// </summary>
+        private readonly Thread readerThread;
+
+        /// <summary>
+        /// holds the pending read requests. One for each topic.
+        /// </summary>
+        private readonly ConcurrentDictionary<IReaderTopic, ReadRequest> pendingReadRequests;
+
+        /// <summary>
+        /// If set cancels the readers operation
+        /// </summary>
         private readonly CancellationTokenSource cancellationTokenSource = new();
 
         public SingleThreadReader(INotifyingReader<T> instance)
         {
             this.underlyingReader = instance;
-            this.pendingReadRequests = new ConcurrentDictionary<string, ReadRequest>();
+            this.pendingReadRequests = new ConcurrentDictionary<IReaderTopic, ReadRequest>();
             this.readerThread = new Thread(this.ReaderLoop);
             this.readerThread.IsBackground = true;
             this.readerThread.Start();
         }
 
-        private record ReadRequest(string Topic, TaskCompletionSource<T> TaskCompletionSource, CancellationToken CancellationToken);
+        private record ReadRequest(IReaderTopic Topic, TaskCompletionSource<T> TaskCompletionSource, CancellationToken CancellationToken);
 
         /// <summary>
         /// Request a topic from the underlying <see cref="INotifyingReader{T}"/>.
         /// The Task completes when the data arrives.
         /// </summary>
-        public Task<T> RequestAsync(string topic, CancellationToken cancellationToken)
+        public Task<T> RequestAsync(IReaderTopic topic, CancellationToken cancellationToken)
         {
             if (this.cancellationTokenSource.IsCancellationRequested)
             {
+                // don't accept further read request if the reader is in state 'canceled'
                 throw new InvalidOperationException($"ReadRequest(topic='{topic}') rejected: Reader is already disposed.");
             }
 
+            // the task completion source is used to block the caller until the response was read.
+            // also the caller may mark the request as canceled.
             var taskCompletionSource = new TaskCompletionSource<T>();
-            this.pendingReadRequests.TryAdd(topic, new ReadRequest(
+
+            var readRequest = new ReadRequest(
                 Topic: topic,
                 TaskCompletionSource: taskCompletionSource,
-                CancellationToken: cancellationToken));
+                CancellationToken: cancellationToken);
+
+            // the request is added to the collection of pending requests.
+            // one for each topic.
+            if (!this.pendingReadRequests.TryAdd(topic, readRequest))
+            {
+                taskCompletionSource.SetException(new InvalidOperationException($"Topic('{topic}') is already pending"));
+            }
 
             return taskCompletionSource.Task;
         }
