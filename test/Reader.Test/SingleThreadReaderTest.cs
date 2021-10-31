@@ -1,7 +1,6 @@
 using Moq;
 using Reader.Topics;
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
@@ -14,14 +13,27 @@ namespace Reader.Test
 
         public class ReaderMock<T> : INotifyingReader<T>
         {
-            public Action<IReaderTopic, T> DataAvailable { set; private get; }
-
-            private Stack<(IReaderTopic, T)> data = new();
+            public Action<IReaderTopic, T> DataAvailable { set; get; }
 
             public void SetData(IReaderTopic topic, T data) => this.DataAvailable(topic, data);
         }
 
         private static IReaderTopic Topic(string value) => new StringTopic(value);
+
+        [Fact]
+        public async Task Dispose_unregisters_reader_event()
+        {
+            // ACT
+            var lowLevelReader = new ReaderMock<int>();
+
+            using (var reader = new SingleThreadReader<int>(lowLevelReader))
+            {
+                await Task.Delay(10);
+            }
+
+            // ASSERT
+            Assert.Null(lowLevelReader.DataAvailable);
+        }
 
         [Fact]
         public async Task Read_data_and_await_completion()

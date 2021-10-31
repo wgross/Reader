@@ -105,7 +105,16 @@ namespace Reader
                 }
             }
             catch (OperationCanceledException)
-            { }
+            {
+                // this exception is suppressed.
+                // its the expected way to end the loop from the outside.
+            }
+            finally
+            {
+                // unregister the callback from the underlying reader
+                // this is necessary to allow garbage collection of this instance.
+                this.underlyingReader.DataAvailable = null;
+            }
             // TODO: log the end of the reader loop
             // TODO: log unexpected exceptions that break the reader loop.
         }
