@@ -1,6 +1,7 @@
 using Moq;
 using Reader.Topics;
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
@@ -36,6 +37,21 @@ namespace Reader.Test
         }
 
         [Fact]
+        public async Task Dispose_unregisters_reader_event_multiple_loops()
+        {
+            // ACT
+            var lowLevelReader = new ReaderMock<int>();
+
+            using (var reader = new SingleThreadReader<int>(lowLevelReader))
+            {
+                await Task.Delay(1000);
+            }
+
+            // ASSERT
+            Assert.Null(lowLevelReader.DataAvailable);
+        }
+
+        [Fact]
         public async Task Read_data_and_await_completion()
         {
             // ARRANGE
@@ -50,7 +66,30 @@ namespace Reader.Test
             lowLevelReader.SetData(Topic("topic"), 10);
 
             // ASSERT
-            Assert.Equal(10, await result);
+            Assert.Equal(10, (await result).Single());
+        }
+
+        [Fact]
+        public async Task Read_segmented_data_and_await_completion()
+        {
+            // ARRANGE
+            var lowLevelReader = new ReaderMock<int>();
+
+            using var reader = new SingleThreadReader<int>(lowLevelReader);
+            await Task.Delay(10);
+
+            // ACT
+            var result = reader.RequestAsync(Topic("topic"), segments: 2, CancellationToken.None);
+
+            lowLevelReader.SetData(Topic("topic"), 10);
+            lowLevelReader.SetData(Topic("topic"), 11);
+
+            // ASSERT
+            var awaitedResult = await result;
+
+            Assert.Equal(2, awaitedResult.Length);
+            Assert.Equal(10, awaitedResult.ElementAt(0));
+            Assert.Equal(11, awaitedResult.ElementAt(1));
         }
 
         [Fact]
@@ -62,10 +101,33 @@ namespace Reader.Test
             using var reader = new SingleThreadReader<int>(lowLevelReader);
             await Task.Delay(10);
 
+            var cancelReadRequest = new CancellationTokenSource();
+
             // ACT
-            var cts = new CancellationTokenSource();
-            var result = reader.RequestAsync(Topic("topic"), cts.Token);
-            cts.Cancel();
+            var result = reader.RequestAsync(Topic("topic"), cancelReadRequest.Token);
+            cancelReadRequest.Cancel();
+
+            // ASSERT
+            await Assert.ThrowsAsync<TaskCanceledException>(() => result);
+        }
+
+        [Fact]
+        public async Task Read_segmented_data_and_await_cancellation()
+        {
+            // ARRANGE
+            var lowLevelReader = new ReaderMock<int>();
+
+            using var reader = new SingleThreadReader<int>(lowLevelReader);
+            await Task.Delay(10);
+
+            var cancelReadRequest = new CancellationTokenSource();
+
+            // ACT
+            var result = reader.RequestAsync(Topic("topic"), segments: 2, cancelReadRequest.Token);
+
+            lowLevelReader.SetData(Topic("topic"), 10);
+
+            cancelReadRequest.Cancel();
 
             // ASSERT
             await Assert.ThrowsAsync<TaskCanceledException>(() => result);
@@ -80,9 +142,34 @@ namespace Reader.Test
             using var reader = new SingleThreadReader<int>(lowLevelReader);
             await Task.Delay(10);
 
+            var cancelReadRequest = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
             // ACT
-            var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
-            var result = reader.RequestAsync(Topic("topic"), cts.Token);
+            var result = reader.RequestAsync(Topic("topic"), cancelReadRequest.Token);
+
+            await Task.Delay(500);
+
+            // ASSERT
+            await Assert.ThrowsAsync<TaskCanceledException>(() => result);
+        }
+
+        [Fact]
+        public async Task Read_segmented_data_and_await_timeout()
+        {
+            // ARRANGE
+            var lowLevelReader = new ReaderMock<int>();
+
+            using var reader = new SingleThreadReader<int>(lowLevelReader);
+            await Task.Delay(10);
+
+            var cancelReadRequest = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+
+            // ACT
+            var result = reader.RequestAsync(Topic("topic"), segments: 2, cancelReadRequest.Token);
+
+            lowLevelReader.SetData(Topic("topic"), 10);
+
+            await Task.Delay(500);
 
             // ASSERT
             await Assert.ThrowsAsync<TaskCanceledException>(() => result);
@@ -129,8 +216,8 @@ namespace Reader.Test
             // ASSERT
             var awaitResult = await Task.WhenAll(result);
 
-            Assert.Equal(11, awaitResult[0]);
-            Assert.Equal(12, awaitResult[1]);
+            Assert.Equal(11, awaitResult[0].Single());
+            Assert.Equal(12, awaitResult[1].Single());
         }
 
         [Fact]
@@ -154,7 +241,7 @@ namespace Reader.Test
             // ASSERT
             var awaitResult = await result;
 
-            Assert.Equal(11, awaitResult);
+            Assert.Equal(11, awaitResult.Single());
         }
 
         [Fact]
@@ -178,7 +265,7 @@ namespace Reader.Test
             // ASSERT
             var awaitResult = await result;
 
-            Assert.Equal(11, awaitResult);
+            Assert.Equal(11, awaitResult.Single());
         }
 
         [Fact]
@@ -200,7 +287,7 @@ namespace Reader.Test
             // ASSERT
             var awaitResult = await result;
 
-            Assert.Equal(11, awaitResult);
+            Assert.Equal(11, awaitResult.Single());
         }
 
         [Fact]
@@ -244,6 +331,22 @@ namespace Reader.Test
 
             // ASSERT
             Assert.Equal("ReadRequest(topic='topic1') rejected: Reader is already disposed.", result.Message);
+        }
+
+        [Fact]
+        public async Task Reject_zero_segements()
+        {
+            // ARRANGE
+            var lowLevelReader = new ReaderMock<int>();
+
+            var reader = new SingleThreadReader<int>(lowLevelReader);
+
+            // ACT
+            var result = await Assert.ThrowsAsync<ArgumentException>(() => reader.RequestAsync(Topic("topic1"), segments: 0, CancellationToken.None));
+
+            // ASSERT
+            Assert.Equal("segments", result.ParamName);
+            Assert.Equal("ReadRequest(topic='topic1') rejected: number of segments mustn't be zero. (Parameter 'segments')", result.Message);
         }
     }
 }
