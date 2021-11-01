@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Reader.Requests;
+using System;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Threading;
@@ -21,7 +22,7 @@ namespace Reader
         /// <summary>
         /// holds the pending read requests. One for each topic.
         /// </summary>
-        private readonly ConcurrentDictionary<IReaderTopic, ReadRequest> pendingReadRequests;
+        private readonly ConcurrentDictionary<IReaderTopic, IReadRequest<T>> pendingReadRequests;
 
         /// <summary>
         /// If set cancels the readers operation
@@ -31,50 +32,10 @@ namespace Reader
         public SingleThreadReader(INotifyingReader<T> instance)
         {
             this.underlyingReader = instance;
-            this.pendingReadRequests = new ConcurrentDictionary<IReaderTopic, ReadRequest>();
+            this.pendingReadRequests = new ConcurrentDictionary<IReaderTopic, IReadRequest<T>>();
             this.readerThread = new Thread(this.ReaderLoop);
             this.readerThread.IsBackground = true;
             this.readerThread.Start();
-        }
-
-        private sealed class ReadRequest
-        {
-            private readonly T[] resultSegments;
-            private readonly CancellationToken cancellationToken;
-            private readonly TaskCompletionSource<T[]> taskCompletionSource;
-            private int resultSegmentsCollected;
-
-            internal ReadRequest(IReaderTopic topic, TaskCompletionSource<T[]> taskCompletionSource, T[] segments, CancellationToken cancellationToken)
-            {
-                this.Topic = topic;
-                this.taskCompletionSource = taskCompletionSource;
-                this.cancellationToken = cancellationToken;
-                this.resultSegments = segments;
-                this.resultSegmentsCollected = 0;
-            }
-
-            internal IReaderTopic Topic { get; }
-
-            /// <summary>
-            /// A read request is competed if all segments have been received.
-            /// </summary>
-            internal bool CanComplete => this.resultSegments.Length <= this.resultSegmentsCollected;
-
-            /// <summary>
-            /// The read request is canceled if its <see cref="CancellationToken"/> was
-            /// canceled from the outside or by timeout
-            /// </summary>
-            internal bool IsCancellationRequested => this.cancellationToken.IsCancellationRequested;
-
-            internal void SetCanceled() => this.taskCompletionSource.SetCanceled(this.cancellationToken);
-
-            internal void AddResultSegment(T data)
-            {
-                this.resultSegments[this.resultSegmentsCollected] = data;
-                this.resultSegmentsCollected++;
-            }
-
-            internal void SetResult() => this.taskCompletionSource.SetResult(this.resultSegments);
         }
 
         /// <summary>
@@ -100,7 +61,7 @@ namespace Reader
             // also the caller may mark the request as canceled.
             var taskCompletionSource = new TaskCompletionSource<T[]>();
 
-            var readRequest = new ReadRequest(topic, taskCompletionSource, new T[segments], cancellationToken);
+            var readRequest = new ReadRequest<T>(topic, taskCompletionSource, new T[segments], cancellationToken);
 
             // the request is added to the collection of pending requests.
             // one for each topic.
@@ -174,7 +135,7 @@ namespace Reader
             // incoming data is dropped if no read request is pending.
             if (this.pendingReadRequests.TryGetValue(incomingMessage.topic, out var pendingReadRequest))
             {
-                pendingReadRequest.AddResultSegment(incomingMessage.data);
+                pendingReadRequest.AddResponseSegment(incomingMessage.data);
 
                 if (pendingReadRequest.CanComplete)
                 {
@@ -184,7 +145,7 @@ namespace Reader
                     this.pendingReadRequests.TryRemove(incomingMessage.topic, out var _);
 
                     // .. then unblock the waiting thread
-                    pendingReadRequest.SetResult();
+                    pendingReadRequest.Complete();
                 }
             }
             else
