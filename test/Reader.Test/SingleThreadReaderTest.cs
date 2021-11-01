@@ -24,13 +24,12 @@ namespace Reader.Test
         [Fact]
         public async Task Dispose_unregisters_reader_event()
         {
-            // ACT
+            // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
+            var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
 
-            using (var reader = new SingleThreadReader<int>(lowLevelReader))
-            {
-                await Task.Delay(10);
-            }
+            // ACT
+            reader.Dispose();
 
             // ASSERT
             Assert.Null(lowLevelReader.DataAvailable);
@@ -39,13 +38,14 @@ namespace Reader.Test
         [Fact]
         public async Task Dispose_unregisters_reader_event_multiple_loops()
         {
-            // ACT
+            // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
+            var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
 
-            using (var reader = new SingleThreadReader<int>(lowLevelReader))
-            {
-                await Task.Delay(1000);
-            }
+            // ACT
+            await Task.Delay(1000);
+
+            reader.Dispose();
 
             // ASSERT
             Assert.Null(lowLevelReader.DataAvailable);
@@ -57,8 +57,7 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            using var reader = new SingleThreadReader<int>(lowLevelReader);
-            await Task.Delay(10);
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
 
             // ACT
             var result = reader.RequestAsync(Topic("topic"), CancellationToken.None);
@@ -75,8 +74,7 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            using var reader = new SingleThreadReader<int>(lowLevelReader);
-            await Task.Delay(10);
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
 
             // ACT
             var result = reader.RequestAsync(Topic("topic"), segments: 2, CancellationToken.None);
@@ -98,8 +96,7 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            using var reader = new SingleThreadReader<int>(lowLevelReader);
-            await Task.Delay(10);
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
 
             var cancelReadRequest = new CancellationTokenSource();
 
@@ -117,8 +114,7 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            using var reader = new SingleThreadReader<int>(lowLevelReader);
-            await Task.Delay(10);
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
 
             var cancelReadRequest = new CancellationTokenSource();
 
@@ -139,8 +135,7 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            using var reader = new SingleThreadReader<int>(lowLevelReader);
-            await Task.Delay(10);
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
 
             var cancelReadRequest = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
@@ -159,8 +154,7 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            using var reader = new SingleThreadReader<int>(lowLevelReader);
-            await Task.Delay(10);
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
 
             var cancelReadRequest = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
@@ -181,9 +175,7 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            using var reader = new SingleThreadReader<int>(lowLevelReader);
-
-            await Task.Delay(10);
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
 
             var _ = reader.RequestAsync(Topic("topic1"), CancellationToken.None);
 
@@ -200,9 +192,8 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            using var reader = new SingleThreadReader<int>(lowLevelReader);
-            await Task.Delay(10);
-
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
+            
             // ACT
             var result = new[]
             {
@@ -226,9 +217,8 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            using var reader = new SingleThreadReader<int>(lowLevelReader);
-            await Task.Delay(10);
-
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
+            
             var first = reader.RequestAsync(Topic("topic1"), CancellationToken.None);
             lowLevelReader.SetData(Topic("topic1"), 12);
             await first;
@@ -250,9 +240,8 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            using var reader = new SingleThreadReader<int>(lowLevelReader);
-            await Task.Delay(10);
-
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
+            
             var first = reader.RequestAsync(Topic("topic1"), CancellationToken.None);
             lowLevelReader.SetData(Topic("topic1"), 12);
             await first;
@@ -274,8 +263,7 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            using var reader = new SingleThreadReader<int>(lowLevelReader);
-            await Task.Delay(10);
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
 
             lowLevelReader.SetData(Topic("unknown"), 12);
 
@@ -296,9 +284,7 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            var reader = new SingleThreadReader<int>(lowLevelReader);
-
-            await Task.Delay(10);
+            var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
 
             var cts1 = new CancellationTokenSource();
             var cts2 = new CancellationTokenSource();
@@ -323,7 +309,7 @@ namespace Reader.Test
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            var reader = new SingleThreadReader<int>(lowLevelReader);
+            var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
             reader.Dispose();
 
             // ACT
@@ -334,12 +320,12 @@ namespace Reader.Test
         }
 
         [Fact]
-        public async Task Reject_zero_segements()
+        public async Task Reject_zero_segments()
         {
             // ARRANGE
             var lowLevelReader = new ReaderMock<int>();
 
-            var reader = new SingleThreadReader<int>(lowLevelReader);
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
 
             // ACT
             var result = await Assert.ThrowsAsync<ArgumentException>(() => reader.RequestAsync(Topic("topic1"), segments: 0, CancellationToken.None));

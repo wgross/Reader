@@ -24,15 +24,18 @@ namespace Reader
         /// </summary>
         private readonly ConcurrentDictionary<IReaderTopic, IReadRequest<T>> pendingReadRequests;
 
+        private readonly TaskCompletionSource<SingleThreadReader<T>> threadStarted;
+
         /// <summary>
         /// If set cancels the readers operation
         /// </summary>
         private readonly CancellationTokenSource cancellationTokenSource = new();
 
-        public SingleThreadReader(INotifyingReader<T> instance)
+        public SingleThreadReader(INotifyingReader<T> instance, TaskCompletionSource<SingleThreadReader<T>> threadStarted)
         {
             this.underlyingReader = instance;
             this.pendingReadRequests = new ConcurrentDictionary<IReaderTopic, IReadRequest<T>>();
+            this.threadStarted = threadStarted;
             this.readerThread = new Thread(this.ReaderLoop);
             this.readerThread.IsBackground = true;
             this.readerThread.Start();
@@ -89,6 +92,9 @@ namespace Reader
                     // to continue receiving data quickly.
                     incomingMessages.Add((topic, data));
                 };
+
+                // the reader loop notifies its readiness
+                this.threadStarted.SetResult(this);
 
                 // the reader loop runs as long a cancellation of the read wasn't requested.
                 while (!this.cancellationTokenSource.IsCancellationRequested)
