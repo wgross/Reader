@@ -1,4 +1,6 @@
-﻿namespace Reader
+﻿using System;
+
+namespace Reader
 {
     public interface IReadRequest<T>
     {
@@ -16,6 +18,11 @@
         /// Cancels the request. This called by the reader when cleaning up during disposal.
         /// </summary>
         void SetCanceled();
+
+        /// <summary>
+        /// Notifies the request of an error.
+        /// </summary>
+        void SetException(Exception exception);
 
         /// <summary>
         /// Adds a received piece of data to the request result.

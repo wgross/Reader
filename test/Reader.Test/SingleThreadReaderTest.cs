@@ -193,7 +193,7 @@ namespace Reader.Test
             var lowLevelReader = new ReaderMock<int>();
 
             using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
-            
+
             // ACT
             var result = new[]
             {
@@ -218,7 +218,7 @@ namespace Reader.Test
             var lowLevelReader = new ReaderMock<int>();
 
             using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
-            
+
             var first = reader.RequestAsync(Topic("topic1"), CancellationToken.None);
             lowLevelReader.SetData(Topic("topic1"), 12);
             await first;
@@ -241,7 +241,7 @@ namespace Reader.Test
             var lowLevelReader = new ReaderMock<int>();
 
             using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
-            
+
             var first = reader.RequestAsync(Topic("topic1"), CancellationToken.None);
             lowLevelReader.SetData(Topic("topic1"), 12);
             await first;
@@ -333,6 +333,75 @@ namespace Reader.Test
             // ASSERT
             Assert.Equal("segments", result.ParamName);
             Assert.Equal("ReadRequest(topic='topic1') rejected: number of segments mustn't be zero. (Parameter 'segments')", result.Message);
+        }
+
+        [Fact]
+        public async Task Subscribe_data()
+        {
+            // ARRANGE
+            var lowLevelReader = new ReaderMock<int>();
+
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
+
+            var observer = new ObserverMock();
+
+            // ACT
+            using var result = await reader.SubscribeAsync(Topic("topic"), observer, CancellationToken.None);
+
+            lowLevelReader.SetData(Topic("topic"), 10);
+
+            await Task.Delay(10);
+
+            // ASSERT
+            Assert.Equal(10, observer.Data.Single());
+        }
+
+        [Fact]
+        public async Task Subscribe_multiple_segments()
+        {
+            // ARRANGE
+            var lowLevelReader = new ReaderMock<int>();
+
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
+
+            var observer = new ObserverMock();
+
+            // ACT
+            using var result = await reader.SubscribeAsync(Topic("topic"), observer, CancellationToken.None);
+
+            lowLevelReader.SetData(Topic("topic"), 10);
+            lowLevelReader.SetData(Topic("topic"), 11);
+
+            await Task.Delay(10);
+
+            // ASSERT
+            Assert.Equal(new[] { 10, 11 }, observer.Data);
+        }
+
+        [Fact]
+        public async Task Subscriptions_Dispose_ends_subscription()
+        {
+            // ARRANGE
+            var lowLevelReader = new ReaderMock<int>();
+
+            using var reader = await SingleThreadReaderFactory.CreateAsync<int>(lowLevelReader);
+
+            var observer = new ObserverMock();
+
+            // ACT
+            using (var result = await reader.SubscribeAsync(Topic("topic"), observer, CancellationToken.None))
+            {
+                lowLevelReader.SetData(Topic("topic"), 10);
+
+                await Task.Delay(10);
+            }
+
+            lowLevelReader.SetData(Topic("topic"), 11);
+
+            await Task.Delay(10);
+
+            // ASSERT
+            Assert.Equal(new[] { 10 }, observer.Data);
         }
     }
 }

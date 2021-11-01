@@ -1,4 +1,5 @@
-﻿using System.Threading;
+﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Reader.Requests
@@ -46,5 +47,8 @@ namespace Reader.Requests
 
         /// <inheritdoc/>
         void IReadRequest<T>.Complete() => this.taskCompletionSource.SetResult(this.resultSegments);
+
+        /// <inheritdoc/>
+        void IReadRequest<T>.SetException(Exception exception) => this.taskCompletionSource.SetException(exception);
     }
 }

@@ -64,16 +64,30 @@ namespace Reader
             // also the caller may mark the request as canceled.
             var taskCompletionSource = new TaskCompletionSource<T[]>();
 
-            var readRequest = new ReadRequest<T>(topic, taskCompletionSource, new T[segments], cancellationToken);
-
-            // the request is added to the collection of pending requests.
-            // one for each topic.
-            if (!this.pendingReadRequests.TryAdd(topic, readRequest))
-            {
-                taskCompletionSource.SetException(new InvalidOperationException($"Topic('{topic}') is already pending"));
-            }
+            this.AddReadRequest(new ReadRequest<T>(topic, taskCompletionSource, new T[segments], cancellationToken));
 
             return taskCompletionSource.Task;
+        }
+
+        private void AddReadRequest(IReadRequest<T> readRequest)
+        {
+            // the request is added to the collection of pending requests.
+            // one for each topic.
+            if (!this.pendingReadRequests.TryAdd(readRequest.Topic, readRequest))
+            {
+                readRequest.SetException(new InvalidOperationException($"Topic('{readRequest.Topic}') is already pending"));
+            }
+        }
+
+        public Task<IDisposable> SubscribeAsync(IReaderTopic topic, IObserver<T> observer, CancellationToken cancellationToken)
+        {
+            // the task completion source is used to block the caller until the response was read.
+            // also the caller may mark the request as canceled.
+            var subscribeRequest = new SubscribeRequest<T>(topic, cancellationToken);
+
+            this.AddReadRequest(subscribeRequest);
+
+            return Task.FromResult(subscribeRequest.Subscribe(observer));
         }
 
         private void ReaderLoop(object _)
